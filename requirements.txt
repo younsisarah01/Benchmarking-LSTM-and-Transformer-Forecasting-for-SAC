@@ -1,0 +1,18 @@
+# Python packages used by the scripts in scripts/.
+# To reproduce a specific environment, pin the versions with `pip freeze`
+# from the runtime used for the experiments (Google Colab).
+#
+# The scripts also import `google.colab` to mount Google Drive; this module is
+# provided by the Colab runtime (see README.md, section 5, for local runs).
+
+numpy
+pandas
+matplotlib
+scipy
+scikit-learn
+joblib
+# TensorFlow includes Keras; models are saved in HDF5 format (h5py is
+# installed with Keras).
+tensorflow
+# Hardware information for the computational-statistics table
+psutil
