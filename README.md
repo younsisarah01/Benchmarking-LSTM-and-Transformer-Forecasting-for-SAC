@@ -1,91 +1,91 @@
-# Data
+# Experiments
 
-## 1. Dataset
+The experiments are four Python scripts (`../scripts/`), one per Google
+Colab notebook. They exchange data through a single output folder,
+`SAVE_DIR` (default `/content/drive/MyDrive/predictionsfinal/`), and must be
+run **in order**.
 
-The experiments use the **UMass Smart\* Data Set for Sustainability** (Smart\*
-Home data, home "C"), distributed through the UMass Trace Repository:
+```
+HomeC.csv.zip
+     │
+     ▼
+01_lstm_forecasting.py ──► scaler_lstm.pkl, lstm_pred.csv, lstm_val_pred.csv
+     │
+     ▼
+02_transformer_forecasting.py ──► trans_pred.csv, trans_val_pred.csv
+     │                             (loads scaler_lstm.pkl)
+     ├──► (optional) rerun 01 to draw the Transformer figures and the
+     │    LSTM/Transformer comparison table
+     ▼
+03_lstm_transformer_ensemble.py ──► ensemble_pred.csv, metrics_4models.csv
+     │
+     ▼
+04_sac_energy_management.py ──► SAC agents, results_seeds.csv, figures
+        (loads trans_pred.csv, scaler_lstm.pkl and HomeC.csv.zip)
+```
 
-**https://traces.cs.umass.edu/docs/traces/smartstar/**
+## Experiment 1: one-step-ahead load forecasting (scripts 01, 02)
 
-The Smart\* project collects detailed measurements from real homes: whole-house
-and per-circuit electricity consumption, plug loads, on-site generation,
-outdoor weather, and indoor environmental data.
+- **Task:** predict whole-house load (`House overall`, kW) one minute ahead
+  from the previous 60 minutes of five features.
+- **Split:** chronological 70 / 15 / 15 (train / validation / test).
+- **Models:** persistence, LSTM, Transformer encoder (see `../models/README.md`).
+- **Metrics (test set):** MAE, RMSE and R² on normalised values; MAE and RMSE
+  in kW; MAPE (%) in kW, excluding minutes with measured load ≤ 0.05 kW;
+  relative improvement over persistence.
+- **Sensitivity analysis:** Gaussian noise with σ ∈ {0, 0.001, 0.005, 0.01,
+  0.02, 0.05} (normalised units) is added to the test predictions, 10 draws
+  each; the analysis reports the RMSE increase.
 
-Reference publication for the dataset:
-
-> S. Barker, A. Mishra, D. Irwin, E. Cecchet, P. Shenoy and J. Albrecht,
-> "Smart\*: An Open Data Set and Tools for Enabling Research in Sustainable
-> Homes," in *Proc. KDD Workshop on Data Mining Applications in
-> Sustainability (SustKDD)*, 2012.
-
-Access and use are subject to the terms published on the UMass Trace
-Repository. The data are therefore obtained directly from that source and are
-not stored in this repository.
-
-## 2. File used by the scripts
-
-| Item | Value |
+| Output (01) | Output (02) |
 |---|---|
-| File | `HomeC.csv.zip`: a zip archive containing `HomeC.csv` (pandas reads it directly) |
-| Content | minute-level electrical measurements for home C together with weather variables, in one CSV file with a header row |
-| Sampling | 1 minute |
-| Time axis | regular 1-minute index starting on 2016-01-01 at 05:00, built by the scripts row by row |
-| Power units | kW; column names carry a ` [kW]` suffix (e.g. `House overall [kW]`), which the scripts remove |
+| `lstm_pred.csv`, `lstm_val_pred.csv` | `trans_pred.csv`, `trans_val_pred.csv` |
+| `lstm_history.json` | `transformer_history.json` |
+| `metrics_lstm_full.csv` | `metrics_transformer_full.csv` |
+| `sensitivity_analysis.csv` | `sensitivity_analysis_transformer.csv`, `sensitivity_comparison_lstm_tr.csv`¹ |
+| `ieee_lstm_loss`, `ieee_lstm_short_term`, `ieee_lstm_scatter_error` (.pdf/.png) | `ieee_trans_loss`, `ieee_trans_short_term`, `ieee_trans_scatter_error` (.pdf/.png) |
+| `ieee_comparison_full.csv` and Transformer figures² | `TABLE_IX_tr_stats.csv` |
+| `computational_stats_all_models.csv`, `TABLE_IX_computational_statistics.csv` | |
 
-## 3. Variables
+¹ only if `sensitivity_analysis.csv` from 01 exists.
+² only if `trans_pred.csv` from 02 already exists.
 
-### Load forecasting (scripts 01–03)
+Prediction CSVs contain a `time` index, the scaled actual value (`real`) and
+the scaled prediction (`pred_lstm` / `pred_transformer`).
 
-| Role | Column | Unit |
-|---|---|---|
-| Target | `House overall` | kW |
-| Input: lagged target | `House overall` | kW |
-| Input: weather | `temperature`, `precipIntensity` | as provided in the file |
-| Input: calendar | `hour` (0–23), `dayofweek` (0 = Monday) | derived from the time index |
+## Experiment 2: LSTM–Transformer ensemble (script 03)
 
-### Energy management (script 04)
+- The weight w is selected on the **validation** predictions, then applied
+  unchanged to the test predictions.
+- Without validation predictions, the two models are weighted equally
+  (w = 0.5).
+- **Outputs:** `ensemble_weight.txt`, `ensemble_pred.csv`, `metrics_4models.csv`
+  (persistence, LSTM, Transformer, ensemble), figures
+  `fig1_ensemble_weight_search`, `fig2_error_distribution`,
+  `fig3_metrics_barplot`, `fig4_short_term_kw` (.pdf/.png).
 
-| Use | Column(s) |
-|---|---|
-| Measured total load | `House overall` |
-| Controllable thermal load | `Furnace 1` + `Furnace 2` |
-| Shiftable load | `Dishwasher` |
-| Non-controllable base load | `House overall` − furnace − dishwasher (clipped at 0) |
-| Outdoor temperature | `temperature`, converted from °F to °C for the thermal model |
+## Experiment 3: forecast-informed energy management with SAC (script 04)
 
-## 4. Preprocessing
-
-1. Read the zipped CSV with pandas.
-2. Remove the ` [kW]` suffix from the column names.
-3. Assign a regular 1-minute `DatetimeIndex` starting at 2016-01-01 05:00.
-4. Derive `month`, `hour` and `dayofweek` from the index.
-5. Replace ±inf with NaN and drop incomplete rows.
-6. Select the five forecasting inputs and split them chronologically:
-   70 % training, 15 % validation, 15 % test.
-7. Fit a Min-Max scaler (range [0, 1]) on the training split and apply it to
-   the validation and test splits. The same scaler (`scaler_lstm.pkl`) is
-   shared by the LSTM, Transformer, ensemble and SAC scripts.
-8. Build sliding windows of 60 consecutive minutes (5 features) to predict
-   the scaled `House overall` value at the next minute. Windows are built
-   within each split.
-
-For the energy-management experiment, the **evaluation days** are the
-calendar days covered by the Transformer test predictions. The **training
-days** are the remaining days of the file, one per ISO week, up to 20 days.
-
-## 5. Placing the data
-
-**Google Colab (default configuration of the scripts)**
-
-1. Download the data from the UMass Trace Repository.
-2. Save `HomeC.csv.zip` in a Google Drive folder named `SMART HOME DATA` at
-   the root of *My Drive*. The scripts expect
-   `/content/drive/MyDrive/SMART HOME DATA/HomeC.csv.zip`.
-3. Run the scripts in Colab; they mount Google Drive automatically.
-
-**Local machine**
-
-1. Save the file as `data/HomeC.csv.zip` in this repository. The `data/`
-   folder is excluded from version control by `.gitignore`.
-2. Set the data and output paths at the top of each script, as described in
-   the main `README.md` (section 5).
+- **Episode:** one day at a 1-minute step.
+- **Controlled loads:** furnace (duty cycle chosen by the agent, capped in
+  peak/mid-peak hours) and dishwasher (rule-based postponement to off-peak).
+- **Thermal model:** first-order RC (R = 15, C = 50, set-point 22 °C,
+  initial 21 °C).
+- **Tariff (€/kWh):** 0.08 (0–6 h, 22–24 h), 0.12 (6–12 h), 0.18 (12–18 h),
+  0.30 (18–22 h).
+- **Reward:** −(0.40 · cost/0.002 + 0.25 · 25 · excess-over-3.5 kW/3.5
+  + 0.35 · discomfort/0.045).
+- **Days:** evaluation on every day covered by `trans_pred.csv`; training
+  on up to 20 other days (one per ISO week).
+- **Seeds:** 42, 123, 7; at most 50 episodes each with early stopping.
+- **Baselines:** uncontrolled measured consumption and a rule-based
+  controller.
+- **KPIs per day:** daily cost and cost reduction (%), peak power before and
+  after control, thermal and dishwasher discomfort, cost per tariff band.
+  The script also runs a Wilcoxon signed-rank test and computes the
+  peak-to-average ratio.
+- **Outputs:** `sac_seed*_rewards_hist.json`, `results_seeds.csv`,
+  `results_summary.csv`, `abstract_metrics_transformer.json`, figures
+  `figA_consumption_cost`, `figB_before_after`, `figC_dishwasher`,
+  `figD_furnace_zoom`, `figD_furnace_full24h`, `figE_cost_by_tariff`,
+  `figD_furnace_temp`, `figF_learning_curve_3seeds` (.pdf/.png).
