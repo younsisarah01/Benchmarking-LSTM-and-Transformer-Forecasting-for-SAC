@@ -1,0 +1,52 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# ── Virtual environments ──────────────────────────────────
+.venv/
+venv/
+env/
+.conda/
+
+# ── Secrets and local configuration ──────────────────────
+.env
+.env.*
+*.key
+*.pem
+credentials*.json
+kaggle.json
+
+# ── Editors and OS files ─────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ── Datasets (third-party, large; never commit) ──────────
+# Keep only the documentation in data/.
+data/*
+!data/README.md
+*.csv.zip
+HomeC*.csv
+
+# ── Generated outputs ────────────────────────────────────
+# Trained models, checkpoints and scalers
+*.h5
+*.keras
+*.pkl
+*.joblib
+models/*
+!models/README.md
+
+# Result tables, logs and figures produced by the scripts
+# (the scripts write them to Google Drive by default; these rules cover
+# a local SAVE_DIR such as outputs/ or results/)
+outputs/
+results/
+predictionsfinal/
+predictions/
+*.log
