@@ -1,91 +1,32 @@
-# Experiments
+# Models
 
-The experiments are four Python scripts (`../scripts/`), one per Google
-Colab notebook. They exchange data through a single output folder,
-`SAVE_DIR` (default `/content/drive/MyDrive/predictionsfinal/`), and must be
-run **in order**.
+The model architectures are defined in the scripts in `../scripts/`. Trained
+models are written to `SAVE_DIR` (by default
+`/content/drive/MyDrive/predictionsfinal/` on Google Drive).
 
-```
-HomeC.csv.zip
-     │
-     ▼
-01_lstm_forecasting.py ──► scaler_lstm.pkl, lstm_pred.csv, lstm_val_pred.csv
-     │
-     ▼
-02_transformer_forecasting.py ──► trans_pred.csv, trans_val_pred.csv
-     │                             (loads scaler_lstm.pkl)
-     ├──► (optional) rerun 01 to draw the Transformer figures and the
-     │    LSTM/Transformer comparison table
-     ▼
-03_lstm_transformer_ensemble.py ──► ensemble_pred.csv, metrics_4models.csv
-     │
-     ▼
-04_sac_energy_management.py ──► SAC agents, results_seeds.csv, figures
-        (loads trans_pred.csv, scaler_lstm.pkl and HomeC.csv.zip)
-```
+## Implemented models
 
-## Experiment 1: one-step-ahead load forecasting (scripts 01, 02)
+| Model | Defined in | Architecture |
+|---|---|---|
+| Persistence baseline | 01, 02, 03 | ŷ(t) = y(t − 1) |
+| LSTM | `01_lstm_forecasting.py` | Input (60 × 5) → LSTM(128, return sequences) → Dropout(0.2) → LSTM(128) → Dropout(0.2) → Dense(64, ReLU) → Dense(1). Adam, MSE loss, up to 30 epochs, batch 256, early stopping on validation loss (patience 10). |
+| Transformer encoder | `02_transformer_forecasting.py` | Input (60 × 5) → Dense(64) + sinusoidal positional encoding → 2 × [multi-head self-attention (4 heads, key dim 16, dropout 0.1) + residual + LayerNorm → FFN (128 ReLU → 64) + residual + LayerNorm] → global average pooling → Dropout(0.1) → Dense(1). Adam (lr 1e-3), MSE loss, up to 30 epochs, batch 256, early stopping (patience 10). |
+| LSTM–Transformer ensemble | `03_lstm_transformer_ensemble.py` | w · LSTM + (1 − w) · Transformer, with w ∈ {0, 0.05, …, 1} selected by validation MAE. |
+| SAC agent | `04_sac_energy_management.py` | 10-dimensional state. Actor: 2 × Dense(64, ReLU) → mean (tanh) and log-std heads. Twin critics: [state, action] → 2 × Dense(64, ReLU) → Dense(1), with soft-updated target networks. γ = 0.99, τ = 0.005, entropy coefficient 0.2, Adam lr 1e-4, replay buffer 50 000, batch 256. |
+| Rule-based controller | `04_sac_energy_management.py` | Furnace at 60 % during 18–22 h; one 60-minute dishwasher cycle at 02:00. |
 
-- **Task:** predict whole-house load (`House overall`, kW) one minute ahead
-  from the previous 60 minutes of five features.
-- **Split:** chronological 70 / 15 / 15 (train / validation / test).
-- **Models:** persistence, LSTM, Transformer encoder (see `../models/README.md`).
-- **Metrics (test set):** MAE, RMSE and R² on normalised values; MAE and RMSE
-  in kW; MAPE (%) in kW, excluding minutes with measured load ≤ 0.05 kW;
-  relative improvement over persistence.
-- **Sensitivity analysis:** Gaussian noise with σ ∈ {0, 0.001, 0.005, 0.01,
-  0.02, 0.05} (normalised units) is added to the test predictions, 10 draws
-  each; the analysis reports the RMSE increase.
+## Model files (in `SAVE_DIR`)
 
-| Output (01) | Output (02) |
-|---|---|
-| `lstm_pred.csv`, `lstm_val_pred.csv` | `trans_pred.csv`, `trans_val_pred.csv` |
-| `lstm_history.json` | `transformer_history.json` |
-| `metrics_lstm_full.csv` | `metrics_transformer_full.csv` |
-| `sensitivity_analysis.csv` | `sensitivity_analysis_transformer.csv`, `sensitivity_comparison_lstm_tr.csv`¹ |
-| `ieee_lstm_loss`, `ieee_lstm_short_term`, `ieee_lstm_scatter_error` (.pdf/.png) | `ieee_trans_loss`, `ieee_trans_short_term`, `ieee_trans_scatter_error` (.pdf/.png) |
-| `ieee_comparison_full.csv` and Transformer figures² | `TABLE_IX_tr_stats.csv` |
-| `computational_stats_all_models.csv`, `TABLE_IX_computational_statistics.csv` | |
+| File | Written by | Content |
+|---|---|---|
+| `scaler_lstm.pkl` | 01 | Min-Max scaler fitted on the training split, used by scripts 02, 03 and 04 |
+| `lstm_checkpoint.h5` | 01 | best LSTM by validation loss |
+| `model_lstm.h5` | 01 | final LSTM model |
+| `model_transformer.h5` | 02 | final Transformer model |
+| `ensemble_weight.txt` | 03 | selected ensemble weight w |
+| `sac_seed{42,123,7}_actor.weights.h5`, `sac_seed{…}_c1.weights.h5` | 04 | best actor and critic for each seed |
+| `sac_best_actor.weights.h5`, `sac_best_c1.weights.h5` | 04 | agent of the seed with the highest mean cost reduction |
 
-¹ only if `sensitivity_analysis.csv` from 01 exists.
-² only if `trans_pred.csv` from 02 already exists.
-
-Prediction CSVs contain a `time` index, the scaled actual value (`real`) and
-the scaled prediction (`pred_lstm` / `pred_transformer`).
-
-## Experiment 2: LSTM–Transformer ensemble (script 03)
-
-- The weight w is selected on the **validation** predictions, then applied
-  unchanged to the test predictions.
-- Without validation predictions, the two models are weighted equally
-  (w = 0.5).
-- **Outputs:** `ensemble_weight.txt`, `ensemble_pred.csv`, `metrics_4models.csv`
-  (persistence, LSTM, Transformer, ensemble), figures
-  `fig1_ensemble_weight_search`, `fig2_error_distribution`,
-  `fig3_metrics_barplot`, `fig4_short_term_kw` (.pdf/.png).
-
-## Experiment 3: forecast-informed energy management with SAC (script 04)
-
-- **Episode:** one day at a 1-minute step.
-- **Controlled loads:** furnace (duty cycle chosen by the agent, capped in
-  peak/mid-peak hours) and dishwasher (rule-based postponement to off-peak).
-- **Thermal model:** first-order RC (R = 15, C = 50, set-point 22 °C,
-  initial 21 °C).
-- **Tariff (€/kWh):** 0.08 (0–6 h, 22–24 h), 0.12 (6–12 h), 0.18 (12–18 h),
-  0.30 (18–22 h).
-- **Reward:** −(0.40 · cost/0.002 + 0.25 · 25 · excess-over-3.5 kW/3.5
-  + 0.35 · discomfort/0.045).
-- **Days:** evaluation on every day covered by `trans_pred.csv`; training
-  on up to 20 other days (one per ISO week).
-- **Seeds:** 42, 123, 7; at most 50 episodes each with early stopping.
-- **Baselines:** uncontrolled measured consumption and a rule-based
-  controller.
-- **KPIs per day:** daily cost and cost reduction (%), peak power before and
-  after control, thermal and dishwasher discomfort, cost per tariff band.
-  The script also runs a Wilcoxon signed-rank test and computes the
-  peak-to-average ratio.
-- **Outputs:** `sac_seed*_rewards_hist.json`, `results_seeds.csv`,
-  `results_summary.csv`, `abstract_metrics_transformer.json`, figures
-  `figA_consumption_cost`, `figB_before_after`, `figC_dishwasher`,
-  `figD_furnace_zoom`, `figD_furnace_full24h`, `figE_cost_by_tariff`,
-  `figD_furnace_temp`, `figF_learning_curve_3seeds` (.pdf/.png).
+Model files (`*.h5`, `*.pkl`) are excluded from version control by
+`../.gitignore`. Trained weights can be shared as a release asset or through
+an archive service.
